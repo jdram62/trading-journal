@@ -1,0 +1,208 @@
+// Google Apps Script Crypto Trade Journal
+// Author: Jakob Ramirez
+// Language: Google Apps Script
+
+/** 
+ *  Creates 'Advanced' drop down menu in spreadsheet header to run functions 
+ *    @param e : event opening of spreadsheet
+ */
+function onOpen(e){
+ var ui = SpreadsheetApp.getUi();
+ ui.createMenu('Advanced')
+ .addItem('New Month', 'new_month')
+ .addToUi();
+}
+
+/** 
+ *  OnEdit(e) trigger
+ *    @param e : editing spreadsheet
+ */
+function runOnEdit(e) {
+  var edit_sheet = e.source.getActiveSheet();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  open_checkbox(edit_sheet, e, ss);
+  update_stats_out(edit_sheet, e, ss);
+  update_stats_add(edit_sheet, e, ss);
+  check_portval(ss)
+}
+
+/**
+ *  Opens and Closes Trades
+ */
+function open_checkbox(edit_sheet, edit_event, ss){
+  if (edit_sheet.getName() == 'POSITIONS' && edit_event.range.getRow() >= 5 && edit_event.range.getColumn() == 1){
+    var coin_sheet = ss.getSheetByName('COINS');
+    // Get row in COINS sheet to enter trade info 
+    var coin_sheet_row = coin_sheet.getRange('A3:A').getValues();
+    coin_sheet_row = (coin_sheet_row.filter(String).length)+3;
+    // Edited row trade info in OPEN sheet
+    var edit_sheet_range = 'A'+ edit_event.range.getRow() + ':H' + edit_event.range.getRow();
+    var trade_info = edit_sheet.getRange(edit_sheet_range).getValues();
+    // Create New Trade
+    if (edit_event.range.getValue()){ 
+      coin_sheet.getRange(coin_sheet_row, 1).setValue(trade_info[0][1]);  // Date opened
+      coin_sheet.getRange(coin_sheet_row, 3).setValue(trade_info[0][2]);  // Chain
+      coin_sheet.getRange(coin_sheet_row, 4).setValue(trade_info[0][3]);  // Ticker
+      coin_sheet.getRange(coin_sheet_row, 5).setValue(trade_info[0][4]);  // Initial Dollar In
+    }
+    // Close Trade
+    else if (!edit_event.range.getValue()){
+      for (var i=3; i < coin_sheet_row; i++){
+        var coin_sheet_date = coin_sheet.getRange(i, 1).getValue();
+        var coin_sheet_ticker = coin_sheet.getRange(i, 4).getValue();
+        var temp_ticker = String(trade_info[0][3]) + '~'
+        if (String(coin_sheet_date) == String(trade_info[0][1]) && String(coin_sheet_ticker) == String(trade_info[0][3])){
+          coin_sheet.getRange(i,5).setValue(Number(trade_info[0][4]) + Number(trade_info[0][5])); // Dollar In = Init + Added dollar 
+          coin_sheet.getRange(i, 6).setValue(trade_info[0][6]); // Dollar Out
+          var today = new Date();
+          var date = (today.getMonth()+1) + '/' + today.getDate() + '/' + today.getFullYear(); 
+          coin_sheet.getRange(i, 7).setValue(date);  // Date closed
+        }
+        else if (String(coin_sheet_date) == String(trade_info[0][1]) && String(coin_sheet_ticker) == temp_ticker){
+          coin_sheet.deleteRow(i)
+          return;
+        }
+      }
+    }
+  }
+}
+
+/**
+ *  $ OUT Edit, create a second trade in journal that will be used to batch overall trade info once closed
+ */
+function update_stats_out(edit_sheet, edit_event, ss){
+  // $ OUT edit and Checkbox is true 
+  if (edit_sheet.getName() == 'POSITIONS' && edit_event.range.getRow() >= 5 && edit_event.range.getColumn() == 7 
+      && edit_sheet.getRange(edit_event.range.getRow(), 1).getValue()){   
+    // Journal coins sheet
+    var coin_sheet = ss.getSheetByName('COINS');
+    // Get row in COINS sheet to enter trade info 
+    var coin_sheet_row = coin_sheet.getRange('A3:A').getValues();
+    coin_sheet_row = (coin_sheet_row.filter(String).length)+3;
+    // Edited row trade info in OPEN sheet
+    var edit_sheet_range = 'A'+ edit_event.range.getRow() + ':H' + edit_event.range.getRow();
+    var trade_info = edit_sheet.getRange(edit_sheet_range).getValues();
+    // Place holder ticker
+    var temp_ticker = String(trade_info[0][3]) + '~'
+    var today = new Date();
+    var date = (today.getMonth()+1) + '/' + today.getDate() + '/' + today.getFullYear(); 
+    // Find trade in coin sheet
+    for (var i=3; i < coin_sheet_row; i++){
+      var coin_sheet_date = coin_sheet.getRange(i, 1).getValue();
+      var coin_sheet_ticker = coin_sheet.getRange(i, 4).getValue();
+      // Change main trade dollar invested amount
+      if (String(coin_sheet_date) == String(trade_info[0][1]) && String(coin_sheet_ticker) == String(trade_info[0][3])){
+        var dollar_in = coin_sheet.getRange(i,5).getValue();
+        coin_sheet.getRange(i, 5).setValue(Number(trade_info[0][4]) + Number(trade_info[0][5]) - Number(trade_info[0][6])); // Subtract Dollar In
+      }
+      // Add amount sold from main trade to temp trade
+      else if (String(coin_sheet_date) == String(trade_info[0][1]) && String(coin_sheet_ticker) == temp_ticker){
+        coin_sheet.getRange(i, 5).setValue(trade_info[0][6]); // Dollar In
+        coin_sheet.getRange(i, 6).setValue(trade_info[0][6]); // Dollar Out 
+        coin_sheet.getRange(i, 7).setValue(date);  // Date out
+        return;
+      }
+    }
+    // Create temp trade journal entry
+    coin_sheet.getRange(coin_sheet_row, 1).setValue(trade_info[0][1]);  // Date opened
+    coin_sheet.getRange(coin_sheet_row, 3).setValue(trade_info[0][2]);  // Chain
+    coin_sheet.getRange(coin_sheet_row, 4).setValue(temp_ticker);  // Ticker
+    coin_sheet.getRange(coin_sheet_row, 5).setValue(trade_info[0][6]);  // Initial Dollar In
+    coin_sheet.getRange(i, 6).setValue(trade_info[0][6]); // Dollar Out
+    coin_sheet.getRange(i, 7).setValue(date);  // Date out
+      
+  }
+}
+
+/**
+ *  $ ADDED Edit
+ */
+function update_stats_add(edit_sheet, edit_event, ss){
+  // $ ADDED edit and Checkbox is true
+  if (edit_sheet.getName() == 'POSITIONS' && edit_event.range.getRow() >= 5 && edit_event.range.getColumn() == 6 
+      && edit_sheet.getRange(edit_event.range.getRow(), 1).getValue()){ 
+    // Journal coins sheet
+    var coin_sheet = ss.getSheetByName('COINS');
+    // Get row in COINS sheet to enter trade info 
+    var coin_sheet_row = coin_sheet.getRange('A3:A').getValues();
+    coin_sheet_row = (coin_sheet_row.filter(String).length)+3;
+    // Edited row trade info in OPEN sheet
+    var edit_sheet_range = 'A'+ edit_event.range.getRow() + ':H' + edit_event.range.getRow();
+    var trade_info = edit_sheet.getRange(edit_sheet_range).getValues();
+    // Find trade in coin sheet
+    for (var i=3; i < coin_sheet_row; i++){
+      var coin_sheet_date = coin_sheet.getRange(i, 1).getValue();
+      var coin_sheet_ticker = coin_sheet.getRange(i, 4).getValue();
+      if (String(coin_sheet_date) == String(trade_info[0][1]) && String(coin_sheet_ticker) == String(trade_info[0][3])){
+        coin_sheet.getRange(i, 5).setValue((trade_info[0][4]+trade_info[0][5])); // Dollar In
+        return;
+      }
+    }  
+
+  }
+}
+
+/**
+ *  Portval is mainly evaulted from monthly open port $ + realized gains
+ */
+function check_portval(ss){
+  var pos_sheet = ss.getSheetByName('POSITIONS');
+  var coin_sheet =ss.getSheetByName('COINS');
+  var month_open = Number(pos_sheet.getRange(1,3).getValue());
+  // Get row in COINS sheet to enter trade info 
+  var coin_sheet_row = coin_sheet.getRange('A3:A').getValues();
+  coin_sheet_row = (coin_sheet_row.filter(String).length)+3;
+  var realized = 0;
+  for (var i=3; i < coin_sheet_row; i++){
+    var fields = String(coin_sheet.getRange(i,4).getValue()).split('~');
+    // Not temp trade
+    //if (fields.length == 1)
+    //coin_sheet.getRange(i,9).getValue() && 
+    if (coin_sheet.getRange(i,7).getValue()){
+      realized += Number(coin_sheet.getRange(i,9).getValue());
+    }
+    else if(coin_sheet.getRange(i,5).getValue() < 0){
+      realized += Math.abs(Number(coin_sheet.getRange(i,5).getValue()))
+    }
+  }
+  var gas = Number(pos_sheet.getRange(1,6).getValue());
+  var nfts = Number(pos_sheet.getRange(2,6).getValue());
+  var bank = Number(pos_sheet.getRange(1,9).getValue());
+  var port_val = month_open + realized + nfts - bank - gas;
+  pos_sheet.getRange(2,3).setValue(port_val);
+
+}
+
+/**
+ * Record last months 'COINS' trades in a new spreadsheet and moves current months trades in 'COINS' up 
+ */
+function new_month(){
+  var today = new Date();
+  ss = SpreadsheetApp.getActiveSpreadsheet();
+  // create new spreadsheet to record last months trades
+  var month = today.getMonth();
+  var year = today.getFullYear();
+  var record_ss = SpreadsheetApp.create(month + '/' + year);
+  var record_sheet = record_ss.getSheets()[0];
+  coin_sheet = ss.getSheetByName('COINS');
+  // Get row in COINS sheet to enter trade info 
+  var coin_sheet_row = coin_sheet.getRange('A3:A').getValues();
+  coin_sheet_row = (coin_sheet_row.filter(String).length)+3;
+  var j = 3;  
+  for (var i=3; i < coin_sheet_row; i++){
+    var vals_range = 'A'+ i + ':M' + i;
+    var row_vals = coin_sheet.getRange(vals_range).getValues();
+    // old months trades 
+    if(row_vals[0][0].getMonth() < month){
+      record_sheet.getRange(vals_range).setValues(row_vals);
+      coin_sheet.getRange(vals_range).clearContent();
+    }
+    // jump current months trades up in coins sheet
+    else{
+      var new_coins_r = 'A' + j + ':M' + j;
+      coin_sheet.getRange(new_coins_r).setValues(row_vals);
+      coin_sheet.getRange(vals_range).clearContent();
+      j++;
+    }
+  }
+}
